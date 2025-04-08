@@ -243,6 +243,7 @@ class Wav2Vec2Decoder:
 def test(decoder, audio_path, true_transcription):
 
     import Levenshtein
+    import time
 
     audio_input, sr = torchaudio.load(audio_path)
     assert sr == 16000, "Audio sample rate must be 16kHz"
@@ -251,16 +252,39 @@ def test(decoder, audio_path, true_transcription):
     print("Target transcription")
     print(true_transcription)
 
+    results_time = {
+        'greedy': [],
+        'beam': [],
+        'beam_lm': [],
+        'beam_lm_rescore': []
+    }
+    results_distance = {
+        'greedy': [],
+        'beam': [],
+        'beam_lm': [],
+        'beam_lm_rescore': []
+    }
+
     # Print all decoding methods results
     for d_strategy in ["greedy", "beam", "beam_lm", "beam_lm_rescore"]:
         print("-" * 60)
-        print(f"{d_strategy} decoding") 
+        print(f"{d_strategy} decoding")
+        start_time = time.time()
         transcript = decoder.decode(audio_input, method=d_strategy)
+        overall_time = time.time() - start_time
+        distance = Levenshtein.distance(true_transcription, transcript.strip())
         print(f"{transcript}")
-        print(f"Character-level Levenshtein distance: {Levenshtein.distance(true_transcription, transcript.strip())}")
+        print(f"Character-level Levenshtein distance: {distance}")
+
+        results_time[d_strategy].append(overall_time)
+        results_distance[d_strategy].append(distance)
+
+    return results_time, results_distance
 
 
 if __name__ == "__main__":
+
+    from utils import print_statistics
     
     test_samples = [
         ("examples/sample1.wav", "IF YOU ARE GENEROUS HERE IS A FITTING OPPORTUNITY FOR THE EXERCISE OF YOUR MAGNANIMITY IF YOU ARE PROUD HERE AM I YOUR RIVAL READY TO ACKNOWLEDGE MYSELF YOUR DEBTOR FOR AN ACT OF THE MOST NOBLE FORBEARANCE"),
@@ -275,4 +299,10 @@ if __name__ == "__main__":
 
     decoder = Wav2Vec2Decoder()
 
-    _ = [test(decoder, audio_path, target) for audio_path, target in test_samples]
+    results_time, results_distance = [test(decoder, audio_path, target) for audio_path, target in test_samples]
+
+    print('DISTANCE COMPARISON')
+    print_statistics(results_distance)
+    print()
+    print('TIME COMPARISON')
+    print_statistics(results_time)
