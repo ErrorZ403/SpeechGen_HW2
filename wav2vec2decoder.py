@@ -95,7 +95,7 @@ class Wav2Vec2Decoder:
             beams = heapq.nsmallest(self.beam_width, beams)
 
         beams_returned = [(hyp, -score) for score, hyp, _ in beams]
-        best_hypothesis = ''.join(self.vocab[id] for id in beams[0][1]).strip()
+        best_hypothesis = ''.join(self.vocab[id] for id in beams[0][1]).replace(self.word_delimiter, " ").strip()
         
         if return_beams:
             return beams_returned
@@ -136,7 +136,7 @@ class Wav2Vec2Decoder:
                         new_hyp, new_text = hyp, text
                     else:
                         new_hyp = hyp + [token_id]
-                        new_text = (text + self.vocab_dict.get(token_id, '')).strip()
+                        new_text = (text + self.vocav[token_id]).strip()
                     
                     lm_score = self.lm_model.score(new_text) if new_text else 0.0
                     word_count = new_text.count(' ') + 1 if new_text else 0
@@ -147,7 +147,7 @@ class Wav2Vec2Decoder:
             
             beams = heapq.nsmallest(self.beam_width, candidates.values())
         
-        return beams[0][2].strip()
+        return beams[0][2].replace(self.word_delimiter, " ").strip()
 
 
     def lm_rescore(self, beams: List[Tuple[List[int], float]]) -> str:
