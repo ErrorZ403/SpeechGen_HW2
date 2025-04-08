@@ -95,7 +95,7 @@ class Wav2Vec2Decoder:
             beams = heapq.nsmallest(self.beam_width, beams)
 
         beams = [(hyp, -score) for score, hyp, _ in beams]
-        best_hypothesis = ''.join(self.vocab_dict.get(id, '') for id in beams[0][1]).strip()
+        best_hypothesis = ''.join(self.vocab[int(id)] for id in beams[0][1]).strip()
         
         if return_beams:
             return beams
