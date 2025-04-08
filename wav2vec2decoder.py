@@ -74,7 +74,7 @@ class Wav2Vec2Decoder:
                     containing hypotheses and log probabilities.
         """
         log_logits = torch.log_softmax(logits, dim=-1)
-        T, V = log_logits.shape[0]
+        T, V = log_logits.shape
         
         beams = [(-0.0, [])]
         heapq.heapify(beams)
@@ -130,8 +130,8 @@ class Wav2Vec2Decoder:
         if not self.lm_model:
             raise ValueError("KenLM model required for LM rescoring")
 
-        T = logits.shape[0]
         log_logits = torch.log_softmax(logits, dim=-1)
+        T, V = log_logits.shape
         
         beams = [(-0.0, [])]
         heapq.heapify(beams)
