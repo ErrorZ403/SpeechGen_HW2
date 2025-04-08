@@ -8,6 +8,7 @@ def print_statistics(results):
         print(f"MIN: {max(results[d])} \t SAMPLE: {results[d].index(min(results[d]))}")
         print(f"MEAN: {mean(results[d])}")
         print(f"MEDIAN: {median(results[d])}")
+        print()
 
 def aggregate_results(results):
     all_results_time = {

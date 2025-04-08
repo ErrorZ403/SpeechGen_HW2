@@ -300,10 +300,9 @@ if __name__ == "__main__":
 
     results = [test(decoder, audio_path, target) for audio_path, target in test_samples]
 
-    results_distance, results_time = aggregate_results(results)
+    results_time, results_distance = aggregate_results(results)
 
     print('DISTANCE COMPARISON')
     print_statistics(results_distance)
-    print()
     print('TIME COMPARISON')
     print_statistics(results_time)
