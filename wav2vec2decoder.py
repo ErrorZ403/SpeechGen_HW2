@@ -33,7 +33,7 @@ class Wav2Vec2Decoder:
 
         # you can interact with these parameters
         self.vocab = {i: c for c, i in self.processor.tokenizer.get_vocab().items()}
-        self.blank_token_id = self.processor.tokenizer.pad_token_id
+        self.blank_idx = self.processor.tokenizer.pad_idx
         self.word_delimiter = self.processor.tokenizer.word_delimiter_token
         self.beam_width = beam_width
         self.alpha = alpha
@@ -52,7 +52,7 @@ class Wav2Vec2Decoder:
         """
         indices = torch.argmax(logits, dim=-1)
         indices = torch.unique_consecutive(indices, dim=-1)
-        indices = [i.item() for i in indices if i != self.blank_token_id]
+        indices = [i.item() for i in indices if i != self.blank_idx]
         joined = "".join([self.vocab[i] for i in indices])
         
         return joined.replace(self.word_delimiter, " ").strip()
@@ -74,34 +74,46 @@ class Wav2Vec2Decoder:
                     containing hypotheses and log probabilities.
         """
         log_logits = torch.log_softmax(logits, dim=-1)
-        T, V = log_logits.shape
-
-        beams = [(0.0, [], False)]
+        T, V = log_logits.shape[0]
+        
+        beams = [(-0.0, [])]
+        heapq.heapify(beams)
         
         for t in range(T):
-            candidates = defaultdict(float)
-            probs = log_logits[t]
-            top_probs, top_ids = probs.topk(self.beam_width)
+            canditates = []
+            seen = set()
             
-            for neg_score, hyp, _ in beams:
+            while beams and len(canditates) < self.beam_width * 2:
+                neg_score, seq = heapq.heappop(beams)
                 score = -neg_score
-                for prob, token_id in zip(top_probs.tolist(), top_ids.tolist()):
-                    new_score = score + prob
-                    new_hyp = hyp if token_id == self.blank_token_id or (hyp and hyp[-1] == token_id) else hyp + [token_id]
-                    candidates[tuple(new_hyp)] = max(candidates[tuple(new_hyp)], new_score)
+                
+                curr_probs = log_logits[t]
+                top_probs, top_ids = curr_probs.topk(self.beam_width)
+                
+                for prob, idx in zip(top_probs, top_ids):
+                    new_seq = seq.copy()
+                    idx = idx.item()
+                    
+                    if idx != self.blank_idx and (not new_seq or new_seq[-1] != idx):
+                        new_seq.append(idx)
+                    
+                    new_score = score + prob.item()
+                    seq_tuple = tuple(new_seq)
+                    if seq_tuple not in seen:
+                        heapq.heappush(canditates, (-new_score, new_seq))
+                        seen.add(seq_tuple)
             
-            beams = [(-score, list(hyp), False) for hyp, score in candidates.items()]
-            heapq.heapify(beams)
-            beams = heapq.nsmallest(self.beam_width, beams)
-
-        beams_returned = [(hyp, -score) for score, hyp, _ in beams]
-        best_hypothesis = ''.join(self.vocab[id] for id in beams[0][1]).replace(self.word_delimiter, " ").strip()
+            beams = []
+            for _ in range(min(self.beam_width, len(canditates))):
+                beams.append(heapq.heappop(canditates))
         
         if return_beams:
-            return beams_returned
+            return [(-score, seq) for score, seq in beams]
         
-        return best_hypothesis
-            
+        _, best_seq = beams[0]
+        joined = "".join([self.vocab[id] for id in best_seq])
+        
+        return joined.replace(self.word_delimiter, " ").strip()
 
     def beam_search_with_lm(self, logits: torch.Tensor) -> str:
         """
@@ -116,39 +128,54 @@ class Wav2Vec2Decoder:
             str: Decoded transcript
         """
         if not self.lm_model:
-            raise ValueError("KenLM model required for LM shallow fusion")
-        
-        log_logits = torch.log_softmax(logits, dim=-1)
-        T, V = log_logits.shape
+            raise ValueError("KenLM model required for LM rescoring")
 
-        beams = [(0.0, [], "", 0.0)]
+        T = logits.shape[0]
+        log_logits = torch.log_softmax(logits, dim=-1)
+        
+        beams = [(-0.0, [])]
+        heapq.heapify(beams)
         
         for t in range(T):
-            candidates = defaultdict(lambda: (-float('inf'), None, None))
-            probs = log_logits[t]
-            top_probs, top_ids = probs.topk(self.beam_width)
+            canditates = []
+            seen = set()
             
-            for neg_score, hyp, text, acoustic in beams:
-                acoustic_score = acoustic
-                for prob, token_id in zip(top_probs.tolist(), top_ids.tolist()):
-                    new_acoustic = acoustic_score + prob
-                    if token_id == self.blank_token_id or (hyp and hyp[-1] == token_id):
-                        new_hyp, new_text = hyp, text
-                    else:
-                        new_hyp = hyp + [token_id]
-                        new_text = (text + self.vocav[token_id]).strip()
+            while beams and len(canditates) < self.beam_width * 2:
+                neg_score, seq = heapq.heappop(beams)
+                score = -neg_score
+                
+                curr_probs = log_logits[t]
+                top_probs, top_ids = curr_probs.topk(self.beam_width)
+                
+                for prob, idx in zip(top_probs, top_ids):
+                    new_seq = seq.copy()
+                    idx = idx.item()
                     
-                    lm_score = self.lm_model.score(new_text) if new_text else 0.0
-                    word_count = new_text.count(' ') + 1 if new_text else 0
-                    total_score = new_acoustic + self.alpha * lm_score + self.beta * word_count
+                    if idx != self.blank_idx and (not new_seq or new_seq[-1] != idx):
+                        new_seq.append(idx)
                     
-                    if -total_score < candidates[tuple(new_hyp)][0]:
-                        candidates[tuple(new_hyp)] = (-total_score, new_hyp, new_text, new_acoustic)
+                    joined = "".join([self.vocab[id] for id in new_seq])
+                    words = joined.split(self.word_delimiter)
+                    lm_text = " ".join(words).strip()
+                    
+                    am_score = prob.item()
+                    lm_score = self.lm_model.score(lm_text) if lm_text else 0.0
+                    word_bonus = len(words) * self.beta if lm_text else 0.0
+                    new_score = score + am_score + (self.alpha * lm_score) + word_bonus
+                    
+                    seq_tuple = tuple(new_seq)
+                    if seq_tuple not in seen:
+                        heapq.heappush(canditates, (-new_score, new_seq))
+                        seen.add(seq_tuple)
             
-            beams = heapq.nsmallest(self.beam_width, candidates.values())
+            beams = []
+            for _ in range(min(self.beam_width, len(canditates))):
+                beams.append(heapq.heappop(canditates))
         
-        return beams[0][2].replace(self.word_delimiter, " ").strip()
-
+        _, best_seq = beams[0]
+        joined = "".join([self.vocab[id] for id in best_seq])
+        
+        return joined.replace(self.word_delimiter, " ").strip()
 
     def lm_rescore(self, beams: List[Tuple[List[int], float]]) -> str:
         """
@@ -163,15 +190,23 @@ class Wav2Vec2Decoder:
         if not self.lm_model:
             raise ValueError("KenLM model required for LM rescoring")
         
-        rescored = [None] * len(beams)
-        for i, (hyp, acoustic_score) in enumerate(beams):
-            text = ''.join(self.vocab[id] for id in hyp).strip()
-            lm_score = self.lm_model.score(text) if text else 0.0
-            word_count = text.count(' ') + 1 if text else 0
-            total_score = acoustic_score + self.alpha * lm_score + self.beta * word_count
-            rescored[i] = (total_score, text)
+        rescored_beams = []
+        heapq.heapify(rescored_beams)
         
-        return max(rescored, key=lambda x: x[0])[1]
+        for neg_score, seq in beams:
+            score = -neg_score
+            text = "".join([self.vocab[id] for id in seq])
+            words = text.split(self.word_delimiter)
+            lm_text = " ".join(words).strip()
+            
+            lm_score = self.lm_model.score(lm_text) if lm_text else 0.0
+            total_score = score + (self.alpha * lm_score)
+            heapq.heappush(rescored_beams, (-total_score, seq))
+        
+        _, best_seq = heapq.heappop(rescored_beams)
+        
+        joined = "".join([self.vocab[id] for id in best_seq])
+        return joined.replace(self.word_delimiter, " ").strip()
 
     def decode(self, audio_input: torch.Tensor, method: str = "greedy") -> str:
         """
