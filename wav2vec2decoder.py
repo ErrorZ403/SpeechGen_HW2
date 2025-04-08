@@ -33,7 +33,7 @@ class Wav2Vec2Decoder:
 
         # you can interact with these parameters
         self.vocab = {i: c for c, i in self.processor.tokenizer.get_vocab().items()}
-        self.blank_idx = self.processor.tokenizer.pad_idx
+        self.blank_token_id = self.processor.tokenizer.pad_token_id
         self.word_delimiter = self.processor.tokenizer.word_delimiter_token
         self.beam_width = beam_width
         self.alpha = alpha
@@ -52,7 +52,7 @@ class Wav2Vec2Decoder:
         """
         indices = torch.argmax(logits, dim=-1)
         indices = torch.unique_consecutive(indices, dim=-1)
-        indices = [i.item() for i in indices if i != self.blank_idx]
+        indices = [i.item() for i in indices if i != self.blank_token_id]
         joined = "".join([self.vocab[i] for i in indices])
         
         return joined.replace(self.word_delimiter, " ").strip()
@@ -94,7 +94,7 @@ class Wav2Vec2Decoder:
                     new_seq = seq.copy()
                     idx = idx.item()
                     
-                    if idx != self.blank_idx and (not new_seq or new_seq[-1] != idx):
+                    if idx != self.blank_token_id and (not new_seq or new_seq[-1] != idx):
                         new_seq.append(idx)
                     
                     new_score = score + prob.item()
@@ -151,7 +151,7 @@ class Wav2Vec2Decoder:
                     new_seq = seq.copy()
                     idx = idx.item()
                     
-                    if idx != self.blank_idx and (not new_seq or new_seq[-1] != idx):
+                    if idx != self.blank_token_id and (not new_seq or new_seq[-1] != idx):
                         new_seq.append(idx)
                     
                     joined = "".join([self.vocab[id] for id in new_seq])
