@@ -52,7 +52,7 @@ class Wav2Vec2Decoder:
         """
         indices = torch.argmax(logits, dim=-1)
         indices = torch.unique_consecutive(indices, dim=-1)
-        indices = [i for i in indices if i != self.blank_token_id]
+        indices = [i.item() for i in indices if i != self.blank_token_id]
         joined = "".join([self.vocab[i] for i in indices])
         
         return joined.replace(self.word_delimiter, " ").strip()
