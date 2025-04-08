@@ -1,9 +1,11 @@
+from collections import defaultdict
 from typing import List, Tuple
 
 import kenlm
 import torch
 import torchaudio
 from transformers import Wav2Vec2Processor, Wav2Vec2ForCTC
+import heapq
 
 
 class Wav2Vec2Decoder:
@@ -48,8 +50,12 @@ class Wav2Vec2Decoder:
         Returns:
             str: Decoded transcript
         """
-        # <YOUR CODE GOES HERE>
-        return
+        indices = torch.argmax(logits, dim=-1)
+        indices = torch.unique_consecutive(indices, dim=-1)
+        indices = [i for i in indices if i != self.blank]
+        joined = "".join([self.vocab[i] for i in indices])
+        
+        return joined.replace(self.word_delimiter, " ").strip()
 
     def beam_search_decode(self, logits: torch.Tensor, return_beams: bool = False):
         """
@@ -67,11 +73,35 @@ class Wav2Vec2Decoder:
                 (List[Tuple[List[int], float]]) - If return_beams is True, returns a list of tuples
                     containing hypotheses and log probabilities.
         """
-        # <YOUR CODE GOES HERE>
+        log_logits = torch.log_softmax(logits, dim=-1)
+        T, V = log_logits.shape
+
+        beams = [(0.0, [], False)]
+        
+        for t in range(T):
+            candidates = defaultdict(float)
+            probs = log_logits[t]
+            top_probs, top_ids = probs.topk(self.beam_width)
+            
+            for neg_score, hyp, _ in beams:
+                score = -neg_score
+                for prob, token_id in zip(top_probs.tolist(), top_ids.tolist()):
+                    new_score = score + prob
+                    new_hyp = hyp if token_id == self.blank_token_id or (hyp and hyp[-1] == token_id) else hyp + [token_id]
+                    candidates[tuple(new_hyp)] = max(candidates[tuple(new_hyp)], new_score)
+            
+            beams = [(-score, list(hyp), False) for hyp, score in candidates.items()]
+            heapq.heapify(beams)
+            beams = heapq.nsmallest(self.beam_width, beams)
+
+        beams = [(hyp, -score) for score, hyp, _ in beams]
+        best_hypothesis = ''.join(self.vocab_dict.get(id, '') for id in beams[0][1]).strip()
+        
         if return_beams:
             return beams
-        else:
-            return best_hypothesis
+        
+        return best_hypothesis
+            
 
     def beam_search_with_lm(self, logits: torch.Tensor) -> str:
         """
@@ -88,8 +118,37 @@ class Wav2Vec2Decoder:
         if not self.lm_model:
             raise ValueError("KenLM model required for LM shallow fusion")
         
-        # <YOUR CODE GOES HERE>
-        return
+        log_logits = torch.log_softmax(logits, dim=-1)
+        T, V = log_logits.shape
+
+        beams = [(0.0, [], "", 0.0)]
+        
+        for t in range(T):
+            candidates = defaultdict(lambda: (-float('inf'), None, None))
+            probs = log_logits[t]
+            top_probs, top_ids = probs.topk(self.beam_width)
+            
+            for neg_score, hyp, text, acoustic in beams:
+                acoustic_score = acoustic
+                for prob, token_id in zip(top_probs.tolist(), top_ids.tolist()):
+                    new_acoustic = acoustic_score + prob
+                    if token_id == self.blank_token_id or (hyp and hyp[-1] == token_id):
+                        new_hyp, new_text = hyp, text
+                    else:
+                        new_hyp = hyp + [token_id]
+                        new_text = (text + self.vocab_dict.get(token_id, '')).strip()
+                    
+                    lm_score = self.lm_model.score(new_text) if new_text else 0.0
+                    word_count = new_text.count(' ') + 1 if new_text else 0
+                    total_score = new_acoustic + self.alpha * lm_score + self.beta * word_count
+                    
+                    if -total_score < candidates[tuple(new_hyp)][0]:
+                        candidates[tuple(new_hyp)] = (-total_score, new_hyp, new_text, new_acoustic)
+            
+            beams = heapq.nsmallest(self.beam_width, candidates.values())
+        
+        return beams[0][2].strip()
+
 
     def lm_rescore(self, beams: List[Tuple[List[int], float]]) -> str:
         """
@@ -103,8 +162,16 @@ class Wav2Vec2Decoder:
         """
         if not self.lm_model:
             raise ValueError("KenLM model required for LM rescoring")
-        # <YOUR CODE GOES HERE>
-        return
+        
+        rescored = [None] * len(beams)
+        for i, (hyp, acoustic_score) in enumerate(beams):
+            text = ''.join(self.vocab_dict.get(id, '') for id in hyp).strip()
+            lm_score = self.lm_model.score(text) if text else 0.0
+            word_count = text.count(' ') + 1 if text else 0
+            total_score = acoustic_score + self.alpha * lm_score + self.beta * word_count
+            rescored[i] = (total_score, text)
+        
+        return max(rescored, key=lambda x: x[0])[1]
 
     def decode(self, audio_input: torch.Tensor, method: str = "greedy") -> str:
         """
