@@ -281,10 +281,9 @@ def test(decoder, audio_path, true_transcription):
 
     return results_time, results_distance
 
-
 if __name__ == "__main__":
 
-    from utils import print_statistics
+    from utils import print_statistics, aggregate_results
     
     test_samples = [
         ("examples/sample1.wav", "IF YOU ARE GENEROUS HERE IS A FITTING OPPORTUNITY FOR THE EXERCISE OF YOUR MAGNANIMITY IF YOU ARE PROUD HERE AM I YOUR RIVAL READY TO ACKNOWLEDGE MYSELF YOUR DEBTOR FOR AN ACT OF THE MOST NOBLE FORBEARANCE"),
@@ -299,7 +298,9 @@ if __name__ == "__main__":
 
     decoder = Wav2Vec2Decoder()
 
-    results_time, results_distance = [test(decoder, audio_path, target) for audio_path, target in test_samples]
+    results = [test(decoder, audio_path, target) for audio_path, target in test_samples]
+
+    results_distance, results_time = aggregate_results(results)
 
     print('DISTANCE COMPARISON')
     print_statistics(results_distance)
