@@ -160,8 +160,8 @@ class Wav2Vec2Decoder:
                     
                     am_score = prob.item()
                     lm_score = self.lm_model.score(lm_text) if lm_text else 0.0
-                    word_bonus = len(words) * self.beta if lm_text else 0.0
-                    new_score = score + am_score + (self.alpha * lm_score) + word_bonus
+                    seq_len = len(words) * self.beta if lm_text else 0.0
+                    new_score = score + am_score + (self.alpha * lm_score) + seq_len
                     
                     seq_tuple = tuple(new_seq)
                     if seq_tuple not in seen:

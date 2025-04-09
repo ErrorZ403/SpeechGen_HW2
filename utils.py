@@ -5,7 +5,7 @@ def print_statistics(results):
         print(f"DECODING STRATEGY {d}")
 
         print(f"MAX: {max(results[d])} \t SAMPLE: {results[d].index(max(results[d]))}")
-        print(f"MIN: {max(results[d])} \t SAMPLE: {results[d].index(min(results[d]))}")
+        print(f"MIN: {min(results[d])} \t SAMPLE: {results[d].index(min(results[d]))}")
         print(f"MEAN: {mean(results[d])}")
         print(f"MEDIAN: {median(results[d])}")
         print()
